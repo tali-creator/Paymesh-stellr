@@ -8,3 +8,8 @@ pub fn emit_autoshare_created(env: &Env, id: BytesN<32>, creator: Address) {
     // Publish the event with the AutoShare ID as the data
     env.events().publish(topics, id);
 }
+
+pub fn emit_autoshare_updated(env: &Env, id: BytesN<32>, updater: Address) {
+    let topics = (symbol_short!("updated"), updater);
+    env.events().publish(topics, id);
+}
