@@ -16,4 +16,7 @@ pub enum Error {
     DuplicateMember = 10,
     InsufficientBalance = 11,
     InvalidAmount = 12,
+    GroupInactive = 13,
+    GroupAlreadyActive = 14,
+    GroupAlreadyInactive = 15,
 }

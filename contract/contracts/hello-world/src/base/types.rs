@@ -7,6 +7,7 @@ pub struct AutoShareDetails {
     pub name: String,
     pub creator: Address,
     pub members: Vec<GroupMember>,
+    pub is_active: bool,
 }
 
 #[contracttype]

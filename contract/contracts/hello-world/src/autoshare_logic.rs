@@ -1,6 +1,7 @@
 use crate::base::errors::Error;
 use crate::base::events::{
     emit_autoshare_created, emit_autoshare_updated, emit_contract_paused, emit_contract_unpaused,
+    emit_group_activated, emit_group_deactivated,
 };
 use crate::base::types::{AutoShareDetails, GroupMember};
 use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
@@ -144,6 +145,7 @@ pub fn create_autoshare(
         name,
         creator: creator.clone(),
         members,
+        is_active: true,
     };
 
     // Store the details in persistent storage
@@ -180,6 +182,11 @@ pub fn update_members(
     // Authorization check
     if caller != details.creator {
         return Err(Error::NotAuthorized);
+    }
+
+    // Check if group is active
+    if !details.is_active {
+        return Err(Error::GroupInactive);
     }
 
     // Validate new members
@@ -290,4 +297,76 @@ pub fn add_group_member(
     });
     env.storage().persistent().set(&members_key, &members);
     Ok(())
+}
+
+/// Deactivates a group. Only the creator can deactivate.
+pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Error> {
+    caller.require_auth();
+
+    let key = DataKey::AutoShare(id.clone());
+    let mut details: AutoShareDetails = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(Error::NotFound)?;
+
+    // Authorization check - only creator can deactivate
+    if caller != details.creator {
+        return Err(Error::NotAuthorized);
+    }
+
+    // Check if already inactive
+    if !details.is_active {
+        return Err(Error::GroupAlreadyInactive);
+    }
+
+    // Set to inactive
+    details.is_active = false;
+    env.storage().persistent().set(&key, &details);
+
+    // Emit event
+    emit_group_deactivated(&env, id, caller);
+    Ok(())
+}
+
+/// Activates a group. Only the creator can activate.
+pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Error> {
+    caller.require_auth();
+
+    let key = DataKey::AutoShare(id.clone());
+    let mut details: AutoShareDetails = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(Error::NotFound)?;
+
+    // Authorization check - only creator can activate
+    if caller != details.creator {
+        return Err(Error::NotAuthorized);
+    }
+
+    // Check if already active
+    if details.is_active {
+        return Err(Error::GroupAlreadyActive);
+    }
+
+    // Set to active
+    details.is_active = true;
+    env.storage().persistent().set(&key, &details);
+
+    // Emit event
+    emit_group_activated(&env, id, caller);
+    Ok(())
+}
+
+/// Returns whether a group is active.
+pub fn is_group_active(env: Env, id: BytesN<32>) -> Result<bool, Error> {
+    let key = DataKey::AutoShare(id);
+    let details: AutoShareDetails = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(Error::NotFound)?;
+    
+    Ok(details.is_active)
 }

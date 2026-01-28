@@ -94,6 +94,21 @@ impl AutoShareContract {
     pub fn add_group_member(env: Env, id: BytesN<32>, address: Address, percentage: u32) {
         autoshare_logic::add_group_member(env, id, address, percentage).unwrap();
     }
+
+    /// Deactivates a group. Only the creator can deactivate.
+    pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) {
+        autoshare_logic::deactivate_group(env, id, caller).unwrap();
+    }
+
+    /// Activates a group. Only the creator can activate.
+    pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) {
+        autoshare_logic::activate_group(env, id, caller).unwrap();
+    }
+
+    /// Returns whether a group is active.
+    pub fn is_group_active(env: Env, id: BytesN<32>) -> bool {
+        autoshare_logic::is_group_active(env, id).unwrap()
+    }
 }
 
 // 3. Link the tests (Requirement: Unit Tests)
