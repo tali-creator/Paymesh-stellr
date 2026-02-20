@@ -7,7 +7,25 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
-import { Search, Mail, Plus } from "lucide-react";
+import { Search, Mail, Plus, Loader2 } from "lucide-react";
+
+function InputField({
+  label,
+  children,
+  error,
+}: {
+  label: string;
+  children: React.ReactNode;
+  error?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-foreground">{label}</label>
+      {children}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
 
 export default function ComponentTestPage() {
   const [loading, setLoading] = useState(false);
@@ -35,9 +53,9 @@ export default function ComponentTestPage() {
             <div>
               <h3 className="text-lg font-medium text-foreground mb-3">Variants</h3>
               <div className="flex flex-wrap gap-3">
-                <Button variant="primary">Primary Button</Button>
+                <Button>Default Button</Button>
                 <Button variant="secondary">Secondary Button</Button>
-                <Button variant="tertiary">Tertiary Button</Button>
+                <Button variant="outline">Outline Button</Button>
                 <Button variant="destructive">Destructive</Button>
               </div>
             </div>
@@ -46,7 +64,7 @@ export default function ComponentTestPage() {
               <h3 className="text-lg font-medium text-foreground mb-3">Sizes</h3>
               <div className="flex flex-wrap items-center gap-3">
                 <Button size="sm">Small</Button>
-                <Button size="md">Medium</Button>
+                <Button size="default">Medium</Button>
                 <Button size="lg">Large</Button>
               </div>
             </div>
@@ -55,7 +73,8 @@ export default function ComponentTestPage() {
               <h3 className="text-lg font-medium text-foreground mb-3">States</h3>
               <div className="flex flex-wrap gap-3">
                 <Button disabled>Disabled</Button>
-                <Button loading={loading} onClick={handleLoadingDemo}>
+                <Button disabled={loading} onClick={handleLoadingDemo}>
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   {loading ? "Loading..." : "Click to Load"}
                 </Button>
               </div>
@@ -64,8 +83,14 @@ export default function ComponentTestPage() {
             <div>
               <h3 className="text-lg font-medium text-foreground mb-3">With Icons</h3>
               <div className="flex flex-wrap gap-3">
-                <Button leftIcon={<Plus className="h-4 w-4" />}>Create New</Button>
-                <Button rightIcon={<Mail className="h-4 w-4" />}>Send Email</Button>
+                <Button>
+                  <Plus className="h-4 w-4" />
+                  Create New
+                </Button>
+                <Button>
+                  Send Email
+                  <Mail className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           </div>
@@ -76,12 +101,27 @@ export default function ComponentTestPage() {
           <h2 className="text-2xl font-semibold text-foreground border-b border-border pb-2">Input Component</h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
-            <Input label="Name" placeholder="Enter your name" />
-            <Input label="Email" type="email" placeholder="your@email.com" />
-            <Input label="Password" type="password" placeholder="Enter password" />
-            <Input label="With Icon" leftIcon={<Search className="h-4 w-4" />} placeholder="Search..." />
-            <Input label="Error State" error="This field is required" placeholder="Invalid input" />
-            <Input label="Disabled" disabled placeholder="Disabled input" />
+            <InputField label="Name">
+              <Input placeholder="Enter your name" />
+            </InputField>
+            <InputField label="Email">
+              <Input type="email" placeholder="your@email.com" />
+            </InputField>
+            <InputField label="Password">
+              <Input type="password" placeholder="Enter password" />
+            </InputField>
+            <InputField label="With Icon">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Search..." />
+              </div>
+            </InputField>
+            <InputField label="Error State" error="This field is required">
+              <Input aria-invalid placeholder="Invalid input" />
+            </InputField>
+            <InputField label="Disabled">
+              <Input disabled placeholder="Disabled input" />
+            </InputField>
           </div>
         </section>
 

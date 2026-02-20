@@ -42,7 +42,7 @@ export default function NotFound() {
         </h3>
 
         <Link href="/">
-          <Button variant="primary" size="lg">
+          <Button variant="default" size="lg">
             Return to Home
           </Button>
         </Link>
