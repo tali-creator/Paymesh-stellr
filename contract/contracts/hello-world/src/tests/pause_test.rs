@@ -185,6 +185,39 @@ fn test_add_member_fails_when_paused() {
 }
 
 #[test]
+#[should_panic]
+fn test_topup_subscription_fails_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AutoShareContract, ());
+    let client = AutoShareContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize_admin(&admin);
+
+    // Setup token
+    let token_admin = Address::generate(&env);
+    let (token_client, token_admin_client) = create_token_contract(&env, &token_admin);
+    let token_address = token_client.address.clone();
+    client.add_supported_token(&token_address, &admin);
+
+    let creator = Address::generate(&env);
+    let id = BytesN::from_array(&env, &[1u8; 32]);
+    let name = String::from_str(&env, "Test Group");
+
+    token_admin_client.mint(&creator, &10000000);
+    client.create(&id, &name, &creator, &100u32, &token_address);
+
+    // Pause the contract
+    client.pause(&admin);
+
+    // Attempt to top up while paused - should fail with ContractPaused
+    let payer = Address::generate(&env);
+    token_admin_client.mint(&payer, &10000000);
+    client.topup_subscription(&id, &10u32, &token_address, &payer);
+}
+
+#[test]
 fn test_read_functions_work_when_paused() {
     let env = Env::default();
     env.mock_all_auths();
