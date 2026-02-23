@@ -234,6 +234,26 @@ impl AutoShareContract {
     }
 
     // ============================================================================
+    // Distribution History
+    // ============================================================================
+
+    /// Returns all distribution history for a group.
+    pub fn get_group_distributions(
+        env: Env,
+        id: BytesN<32>,
+    ) -> Vec<base::types::DistributionHistory> {
+        autoshare_logic::get_group_distributions(env, id)
+    }
+
+    /// Returns all distribution history for a member.
+    pub fn get_member_distributions(
+        env: Env,
+        member: Address,
+    ) -> Vec<base::types::DistributionHistory> {
+        autoshare_logic::get_member_distributions(env, member)
+    }
+
+    // ============================================================================
     // Usage Tracking
     // ============================================================================
 

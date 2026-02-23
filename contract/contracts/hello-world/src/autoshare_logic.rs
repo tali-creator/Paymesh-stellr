@@ -3,7 +3,9 @@ use crate::base::events::{
     AdminTransferred, AutoshareCreated, AutoshareUpdated, ContractPaused, ContractUnpaused,
     Distribution, GroupActivated, GroupDeactivated, GroupDeleted, Withdrawal,
 };
-use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
+use crate::base::types::{
+    AutoShareDetails, DistributionHistory, GroupMember, MemberAmount, PaymentHistory,
+};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
 
 #[contracttype]
@@ -15,6 +17,9 @@ pub enum DataKey {
     UsageFee,
     UserPaymentHistory(Address),
     GroupPaymentHistory(BytesN<32>),
+    GroupDistributionHistory(BytesN<32>),
+    MemberDistributionHistory(Address),
+    GroupMembers(BytesN<32>),
     IsPaused,
 }
 
@@ -97,6 +102,12 @@ pub fn create_autoshare(
     env.storage().persistent().set(&all_groups_key, &all_groups);
     bump_persistent(&env, &all_groups_key);
 
+    // Initialize empty members list
+    let members_key = DataKey::GroupMembers(id.clone());
+    let empty_members: Vec<GroupMember> = Vec::new(&env);
+    env.storage().persistent().set(&members_key, &empty_members);
+    bump_persistent(&env, &members_key);
+
     // Record payment history
     record_payment(
         env.clone(),
@@ -156,7 +167,22 @@ pub fn get_groups_by_creator(env: Env, creator: Address) -> Vec<AutoShareDetails
 }
 
 pub fn is_group_member(env: Env, id: BytesN<32>, address: Address) -> Result<bool, Error> {
-    let details = get_autoshare(env, id)?;
+    // First check if the group exists
+    let group_key = DataKey::AutoShare(id.clone());
+    if !env.storage().persistent().has(&group_key) {
+        return Err(Error::NotFound);
+    }
+    bump_persistent(&env, &group_key);
+
+    let members_key = DataKey::GroupMembers(id);
+    let members: Vec<GroupMember> = env
+        .storage()
+        .persistent()
+        .get(&members_key)
+        .unwrap_or(Vec::new(&env));
+    if !members.is_empty() {
+        bump_persistent(&env, &members_key);
+    }
 
     for member in details.members.iter() {
         if member.address == address {
@@ -222,6 +248,23 @@ pub fn add_group_member(
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
 
+    // Also update the GroupMembers storage to keep both places in sync
+    let members_key = DataKey::GroupMembers(id.clone());
+    let mut members: Vec<GroupMember> = env
+        .storage()
+        .persistent()
+        .get(&members_key)
+        .unwrap_or(Vec::new(&env));
+    if !members.is_empty() {
+        bump_persistent(&env, &members_key);
+    }
+    members.push_back(GroupMember {
+        address: address.clone(),
+        percentage,
+    });
+    env.storage().persistent().set(&members_key, &members);
+    bump_persistent(&env, &members_key);
+
     Ok(())
 }
 
@@ -269,6 +312,10 @@ pub fn remove_group_member(
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
+
+    let members_key = DataKey::GroupMembers(id.clone());
+    env.storage().persistent().set(&members_key, &new_members);
+    bump_persistent(&env, &members_key);
 
     AutoshareUpdated {
         id: id.clone(),
@@ -637,6 +684,74 @@ pub fn get_group_payment_history(env: Env, id: BytesN<32>) -> Vec<PaymentHistory
 }
 
 // ============================================================================
+// Distribution History
+// ============================================================================
+
+fn record_distribution(
+    env: Env,
+    group_id: BytesN<32>,
+    sender: Address,
+    total_amount: i128,
+    token: Address,
+    member_amounts: Vec<MemberAmount>,
+    distribution_number: u32,
+) {
+    let timestamp = env.ledger().timestamp();
+
+    let distribution = DistributionHistory {
+        group_id: group_id.clone(),
+        sender: sender.clone(),
+        total_amount,
+        token: token.clone(),
+        member_amounts: member_amounts.clone(),
+        timestamp,
+        distribution_number,
+    };
+
+    // Add to group's distribution history
+    let group_history_key = DataKey::GroupDistributionHistory(group_id);
+    let mut group_history: Vec<DistributionHistory> = env
+        .storage()
+        .persistent()
+        .get(&group_history_key)
+        .unwrap_or(Vec::new(&env));
+    group_history.push_back(distribution.clone());
+    env.storage()
+        .persistent()
+        .set(&group_history_key, &group_history);
+
+    // Add to each member's distribution history
+    for member_amount in member_amounts.iter() {
+        let member_history_key = DataKey::MemberDistributionHistory(member_amount.address.clone());
+        let mut member_history: Vec<DistributionHistory> = env
+            .storage()
+            .persistent()
+            .get(&member_history_key)
+            .unwrap_or(Vec::new(&env));
+        member_history.push_back(distribution.clone());
+        env.storage()
+            .persistent()
+            .set(&member_history_key, &member_history);
+    }
+}
+
+pub fn get_group_distributions(env: Env, id: BytesN<32>) -> Vec<DistributionHistory> {
+    let group_history_key = DataKey::GroupDistributionHistory(id);
+    env.storage()
+        .persistent()
+        .get(&group_history_key)
+        .unwrap_or(Vec::new(&env))
+}
+
+pub fn get_member_distributions(env: Env, member: Address) -> Vec<DistributionHistory> {
+    let member_history_key = DataKey::MemberDistributionHistory(member);
+    env.storage()
+        .persistent()
+        .get(&member_history_key)
+        .unwrap_or(Vec::new(&env))
+}
+
+// ============================================================================
 // Usage Tracking
 // ============================================================================
 
@@ -742,6 +857,11 @@ pub fn update_members(
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
+
+    // Also update the GroupMembers storage
+    let members_key = DataKey::GroupMembers(id.clone());
+    env.storage().persistent().set(&members_key, &new_members);
+    bump_persistent(&env, &members_key);
 
     AutoshareUpdated {
         id: id.clone(),
@@ -1015,6 +1135,7 @@ pub fn distribute(
 
     let mut distributed: i128 = 0;
     let members_len = details.members.len() as usize;
+    let mut member_amounts: Vec<MemberAmount> = Vec::new(&env);
     for (idx, member) in details.members.iter().enumerate() {
         let share = if idx + 1 < members_len {
             (amount * (member.percentage as i128)) / 100
@@ -1024,8 +1145,23 @@ pub fn distribute(
         if share > 0 {
             client.transfer(&env.current_contract_address(), &member.address, &share);
             distributed += share;
+            member_amounts.push_back(MemberAmount {
+                address: member.address.clone(),
+                amount: share,
+            });
         }
     }
+
+    let distribution_number = details.total_usages_paid - details.usage_count;
+    record_distribution(
+        env.clone(),
+        id.clone(),
+        sender.clone(),
+        amount,
+        token.clone(),
+        member_amounts,
+        distribution_number,
+    );
 
     details.usage_count -= 1;
     env.storage().persistent().set(&key, &details);

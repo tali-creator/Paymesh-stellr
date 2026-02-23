@@ -56,6 +56,31 @@ fn test_distribute_splits_payment_and_decrements_usage() {
     // Verify remaining usages decremented
     let remaining = client.get_remaining_usages(&id);
     assert_eq!(remaining, usages - 1);
+
+    // Verify distribution history
+    let group_distributions = client.get_group_distributions(&id);
+    assert_eq!(group_distributions.len(), 1);
+    let dist = &group_distributions.get(0).unwrap();
+    assert_eq!(dist.group_id, id);
+    assert_eq!(dist.sender, sender);
+    assert_eq!(dist.total_amount, amount);
+    assert_eq!(dist.token, token);
+    assert_eq!(dist.distribution_number, 0); // 1st distribution: total_usages_paid - usage_count = 2 - 2
+    assert_eq!(dist.member_amounts.len(), 3);
+
+    // Verify member distributions
+    let member1_dists = client.get_member_distributions(&member1);
+    assert_eq!(member1_dists.len(), 1);
+    assert_eq!(
+        member1_dists
+            .get(0)
+            .unwrap()
+            .member_amounts
+            .get(0)
+            .unwrap()
+            .amount,
+        500
+    );
 }
 
 #[test]
