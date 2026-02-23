@@ -15,7 +15,6 @@ pub enum DataKey {
     UsageFee,
     UserPaymentHistory(Address),
     GroupPaymentHistory(BytesN<32>),
-    GroupMembers(BytesN<32>),
     IsPaused,
 }
 
@@ -98,12 +97,6 @@ pub fn create_autoshare(
     env.storage().persistent().set(&all_groups_key, &all_groups);
     bump_persistent(&env, &all_groups_key);
 
-    // Initialize empty members list
-    let members_key = DataKey::GroupMembers(id.clone());
-    let empty_members: Vec<GroupMember> = Vec::new(&env);
-    env.storage().persistent().set(&members_key, &empty_members);
-    bump_persistent(&env, &members_key);
-
     // Record payment history
     record_payment(
         env.clone(),
@@ -163,24 +156,9 @@ pub fn get_groups_by_creator(env: Env, creator: Address) -> Vec<AutoShareDetails
 }
 
 pub fn is_group_member(env: Env, id: BytesN<32>, address: Address) -> Result<bool, Error> {
-    // First check if the group exists
-    let group_key = DataKey::AutoShare(id.clone());
-    if !env.storage().persistent().has(&group_key) {
-        return Err(Error::NotFound);
-    }
-    bump_persistent(&env, &group_key);
+    let details = get_autoshare(env, id)?;
 
-    let members_key = DataKey::GroupMembers(id);
-    let members: Vec<GroupMember> = env
-        .storage()
-        .persistent()
-        .get(&members_key)
-        .unwrap_or(Vec::new(&env));
-    if !members.is_empty() {
-        bump_persistent(&env, &members_key);
-    }
-
-    for member in members.iter() {
+    for member in details.members.iter() {
         if member.address == address {
             return Ok(true);
         }
@@ -244,23 +222,6 @@ pub fn add_group_member(
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
 
-    // Also update the GroupMembers storage to keep both places in sync
-    let members_key = DataKey::GroupMembers(id.clone());
-    let mut members: Vec<GroupMember> = env
-        .storage()
-        .persistent()
-        .get(&members_key)
-        .unwrap_or(Vec::new(&env));
-    if !members.is_empty() {
-        bump_persistent(&env, &members_key);
-    }
-    members.push_back(GroupMember {
-        address: address.clone(),
-        percentage,
-    });
-    env.storage().persistent().set(&members_key, &members);
-    bump_persistent(&env, &members_key);
-
     Ok(())
 }
 
@@ -308,10 +269,6 @@ pub fn remove_group_member(
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
-
-    let members_key = DataKey::GroupMembers(id.clone());
-    env.storage().persistent().set(&members_key, &new_members);
-    bump_persistent(&env, &members_key);
 
     AutoshareUpdated {
         id: id.clone(),
@@ -786,11 +743,6 @@ pub fn update_members(
     env.storage().persistent().set(&key, &details);
     bump_persistent(&env, &key);
 
-    // Also update the GroupMembers storage
-    let members_key = DataKey::GroupMembers(id.clone());
-    env.storage().persistent().set(&members_key, &new_members);
-    bump_persistent(&env, &members_key);
-
     AutoshareUpdated {
         id: id.clone(),
         updater: caller,
@@ -891,9 +843,8 @@ pub fn is_group_active(env: Env, id: BytesN<32>) -> Result<bool, Error> {
 /// 3. Group must have 0 remaining usages (or they are forfeited)
 /// 4. Removes group from AllGroups list
 /// 5. Removes AutoShare(id) entry
-/// 6. Removes GroupMembers(id) entry
-/// 7. Archives payment history before deletion (keeps it for audit trail)
-/// 8. Emits GroupDeleted event
+/// 6. Archives payment history before deletion (keeps it for audit trail)
+/// 7. Emits GroupDeleted event
 pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Error> {
     caller.require_auth();
 
@@ -962,11 +913,7 @@ pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Err
     // Step 6: Remove the AutoShare(id) entry
     env.storage().persistent().remove(&key);
 
-    // Step 7: Remove GroupMembers(id) entry
-    let members_key = DataKey::GroupMembers(id.clone());
-    env.storage().persistent().remove(&members_key);
-
-    // Step 8: Archive payment history (we keep it for audit trail)
+    // Step 7: Archive payment history (we keep it for audit trail)
     // Payment history is intentionally NOT deleted to maintain financial records
     // This is a best practice for compliance and auditing purposes
     // The entries remain in:
