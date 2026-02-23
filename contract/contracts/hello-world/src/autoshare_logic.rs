@@ -1,7 +1,7 @@
 use crate::base::errors::Error;
 use crate::base::events::{
     AdminTransferred, AutoshareCreated, AutoshareUpdated, ContractPaused, ContractUnpaused,
-    Distribution, GroupActivated, GroupDeactivated, Withdrawal,
+    Distribution, GroupActivated, GroupDeactivated, GroupDeleted, Withdrawal,
 };
 use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
@@ -17,6 +17,18 @@ pub enum DataKey {
     GroupPaymentHistory(BytesN<32>),
     GroupMembers(BytesN<32>),
     IsPaused,
+}
+
+const DAY_IN_LEDGERS: u32 = 17280;
+const PERSISTENT_BUMP_THRESHOLD: u32 = 7 * DAY_IN_LEDGERS; // 1 week
+const PERSISTENT_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS; // 30 days
+
+fn bump_persistent<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
+    if env.storage().persistent().has(key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    }
 }
 
 pub fn create_autoshare(
@@ -38,6 +50,7 @@ pub fn create_autoshare(
 
     // Check if it already exists to prevent overwriting
     if env.storage().persistent().has(&key) {
+        bump_persistent(&env, &key);
         return Err(Error::AlreadyExists);
     }
 
@@ -71,6 +84,7 @@ pub fn create_autoshare(
 
     // Store the details in persistent storage
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     // Add to all groups list
     let all_groups_key = DataKey::AllGroups;
@@ -81,11 +95,13 @@ pub fn create_autoshare(
         .unwrap_or(Vec::new(&env));
     all_groups.push_back(id.clone());
     env.storage().persistent().set(&all_groups_key, &all_groups);
+    bump_persistent(&env, &all_groups_key);
 
     // Initialize empty members list
     let members_key = DataKey::GroupMembers(id.clone());
     let empty_members: Vec<GroupMember> = Vec::new(&env);
     env.storage().persistent().set(&members_key, &empty_members);
+    bump_persistent(&env, &members_key);
 
     // Record payment history
     record_payment(
@@ -106,7 +122,11 @@ pub fn create_autoshare(
 
 pub fn get_autoshare(env: Env, id: BytesN<32>) -> Result<AutoShareDetails, Error> {
     let key = DataKey::AutoShare(id);
-    env.storage().persistent().get(&key).ok_or(Error::NotFound)
+    let result: Option<AutoShareDetails> = env.storage().persistent().get(&key);
+    if result.is_some() {
+        bump_persistent(&env, &key);
+    }
+    result.ok_or(Error::NotFound)
 }
 
 pub fn get_all_groups(env: Env) -> Vec<AutoShareDetails> {
@@ -116,6 +136,9 @@ pub fn get_all_groups(env: Env) -> Vec<AutoShareDetails> {
         .persistent()
         .get(&all_groups_key)
         .unwrap_or(Vec::new(&env));
+    if !group_ids.is_empty() {
+        bump_persistent(&env, &all_groups_key);
+    }
 
     let mut result: Vec<AutoShareDetails> = Vec::new(&env);
     for id in group_ids.iter() {
@@ -144,6 +167,7 @@ pub fn is_group_member(env: Env, id: BytesN<32>, address: Address) -> Result<boo
     if !env.storage().persistent().has(&group_key) {
         return Err(Error::NotFound);
     }
+    bump_persistent(&env, &group_key);
 
     let members_key = DataKey::GroupMembers(id);
     let members: Vec<GroupMember> = env
@@ -151,6 +175,9 @@ pub fn is_group_member(env: Env, id: BytesN<32>, address: Address) -> Result<boo
         .persistent()
         .get(&members_key)
         .unwrap_or(Vec::new(&env));
+    if !members.is_empty() {
+        bump_persistent(&env, &members_key);
+    }
 
     for member in members.iter() {
         if member.address == address {
@@ -185,6 +212,7 @@ pub fn add_group_member(
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     // Only the group creator can add members
     if details.creator != caller {
@@ -213,6 +241,7 @@ pub fn add_group_member(
 
     // Save updated details
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     // Also update the GroupMembers storage to keep both places in sync
     let members_key = DataKey::GroupMembers(id.clone());
@@ -221,11 +250,15 @@ pub fn add_group_member(
         .persistent()
         .get(&members_key)
         .unwrap_or(Vec::new(&env));
+    if !members.is_empty() {
+        bump_persistent(&env, &members_key);
+    }
     members.push_back(GroupMember {
         address: address.clone(),
         percentage,
     });
     env.storage().persistent().set(&members_key, &members);
+    bump_persistent(&env, &members_key);
 
     Ok(())
 }
@@ -248,6 +281,7 @@ pub fn remove_group_member(
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if details.creator != caller {
         return Err(Error::Unauthorized);
@@ -272,9 +306,11 @@ pub fn remove_group_member(
 
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     let members_key = DataKey::GroupMembers(id.clone());
     env.storage().persistent().set(&members_key, &new_members);
+    bump_persistent(&env, &members_key);
 
     AutoshareUpdated {
         id: id.clone(),
@@ -295,15 +331,20 @@ pub fn initialize_admin(env: Env, admin: Address) {
     // Only set if not already initialized
     if !env.storage().persistent().has(&admin_key) {
         env.storage().persistent().set(&admin_key, &admin);
+        bump_persistent(&env, &admin_key);
 
         // Initialize default usage fee (10 tokens per usage)
         let usage_fee_key = DataKey::UsageFee;
         env.storage().persistent().set(&usage_fee_key, &10u32);
+        bump_persistent(&env, &usage_fee_key);
 
         // Initialize empty supported tokens list
         let tokens_key = DataKey::SupportedTokens;
         let empty_tokens: Vec<Address> = Vec::new(&env);
         env.storage().persistent().set(&tokens_key, &empty_tokens);
+        bump_persistent(&env, &tokens_key);
+    } else {
+        bump_persistent(&env, &admin_key);
     }
 }
 
@@ -314,6 +355,7 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
         .persistent()
         .get(&admin_key)
         .ok_or(Error::Unauthorized)?;
+    bump_persistent(env, &admin_key);
 
     if admin != *caller {
         return Err(Error::Unauthorized);
@@ -323,17 +365,21 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
 }
 
 pub fn get_admin(env: Env) -> Result<Address, Error> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Admin)
-        .ok_or(Error::NotFound)
+    let admin_key = DataKey::Admin;
+    let result: Option<Address> = env.storage().persistent().get(&admin_key);
+    if result.is_some() {
+        bump_persistent(&env, &admin_key);
+    }
+    result.ok_or(Error::NotFound)
 }
 
 pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), Error> {
     current_admin.require_auth();
     require_admin(&env, &current_admin)?;
 
-    env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    let admin_key = DataKey::Admin;
+    env.storage().persistent().set(&admin_key, &new_admin);
+    bump_persistent(&env, &admin_key);
     AdminTransferred {
         old_admin: current_admin,
         new_admin,
@@ -352,12 +398,14 @@ pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
 
     let pause_key = DataKey::IsPaused;
     let is_paused: bool = env.storage().persistent().get(&pause_key).unwrap_or(false);
+    bump_persistent(&env, &pause_key);
 
     if is_paused {
         return Err(Error::AlreadyPaused);
     }
 
     env.storage().persistent().set(&pause_key, &true);
+    bump_persistent(&env, &pause_key);
     ContractPaused {}.publish(&env);
     Ok(())
 }
@@ -368,19 +416,25 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
 
     let pause_key = DataKey::IsPaused;
     let is_paused: bool = env.storage().persistent().get(&pause_key).unwrap_or(false);
+    bump_persistent(&env, &pause_key);
 
     if !is_paused {
         return Err(Error::NotPaused);
     }
 
     env.storage().persistent().set(&pause_key, &false);
+    bump_persistent(&env, &pause_key);
     ContractUnpaused {}.publish(&env);
     Ok(())
 }
 
 pub fn get_paused_status(env: &Env) -> bool {
     let pause_key = DataKey::IsPaused;
-    env.storage().persistent().get(&pause_key).unwrap_or(false)
+    let is_paused: bool = env.storage().persistent().get(&pause_key).unwrap_or(false);
+    if is_paused {
+        bump_persistent(env, &pause_key);
+    }
+    is_paused
 }
 
 // ============================================================================
@@ -397,6 +451,9 @@ pub fn add_supported_token(env: Env, token: Address, admin: Address) -> Result<(
         .persistent()
         .get(&tokens_key)
         .unwrap_or(Vec::new(&env));
+    if !tokens.is_empty() {
+        bump_persistent(&env, &tokens_key);
+    }
 
     // Check if token is already supported
     for existing_token in tokens.iter() {
@@ -407,6 +464,7 @@ pub fn add_supported_token(env: Env, token: Address, admin: Address) -> Result<(
 
     tokens.push_back(token);
     env.storage().persistent().set(&tokens_key, &tokens);
+    bump_persistent(&env, &tokens_key);
     Ok(())
 }
 
@@ -420,6 +478,9 @@ pub fn remove_supported_token(env: Env, token: Address, admin: Address) -> Resul
         .persistent()
         .get(&tokens_key)
         .unwrap_or(Vec::new(&env));
+    if !tokens.is_empty() {
+        bump_persistent(&env, &tokens_key);
+    }
 
     let mut new_tokens: Vec<Address> = Vec::new(&env);
     let mut found = false;
@@ -437,15 +498,17 @@ pub fn remove_supported_token(env: Env, token: Address, admin: Address) -> Resul
     }
 
     env.storage().persistent().set(&tokens_key, &new_tokens);
+    bump_persistent(&env, &tokens_key);
     Ok(())
 }
 
 pub fn get_supported_tokens(env: Env) -> Vec<Address> {
     let tokens_key = DataKey::SupportedTokens;
-    env.storage()
-        .persistent()
-        .get(&tokens_key)
-        .unwrap_or(Vec::new(&env))
+    let result: Option<Vec<Address>> = env.storage().persistent().get(&tokens_key);
+    if result.is_some() {
+        bump_persistent(&env, &tokens_key);
+    }
+    result.unwrap_or(Vec::new(&env))
 }
 
 pub fn is_token_supported(env: Env, token: Address) -> bool {
@@ -471,12 +534,17 @@ pub fn set_usage_fee(env: Env, fee: u32, admin: Address) -> Result<(), Error> {
 
     let fee_key = DataKey::UsageFee;
     env.storage().persistent().set(&fee_key, &fee);
+    bump_persistent(&env, &fee_key);
     Ok(())
 }
 
 pub fn get_usage_fee(env: Env) -> u32 {
     let fee_key = DataKey::UsageFee;
-    env.storage().persistent().get(&fee_key).unwrap_or(10u32)
+    let result: Option<u32> = env.storage().persistent().get(&fee_key);
+    if result.is_some() {
+        bump_persistent(&env, &fee_key);
+    }
+    result.unwrap_or(10u32)
 }
 
 // ============================================================================
@@ -509,6 +577,7 @@ pub fn topup_subscription(
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     // Verify token is supported
     if !is_token_supported(env.clone(), payment_token.clone()) {
@@ -529,6 +598,7 @@ pub fn topup_subscription(
 
     // Save updated details
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     // Record payment history
     record_payment(env, payer, id, additional_usages, total_cost);
@@ -564,10 +634,14 @@ fn record_payment(
         .persistent()
         .get(&user_history_key)
         .unwrap_or(Vec::new(&env));
+    if !user_history.is_empty() {
+        bump_persistent(&env, &user_history_key);
+    }
     user_history.push_back(payment.clone());
     env.storage()
         .persistent()
         .set(&user_history_key, &user_history);
+    bump_persistent(&env, &user_history_key);
 
     // Add to group's payment history
     let group_history_key = DataKey::GroupPaymentHistory(group_id);
@@ -576,26 +650,32 @@ fn record_payment(
         .persistent()
         .get(&group_history_key)
         .unwrap_or(Vec::new(&env));
+    if !group_history.is_empty() {
+        bump_persistent(&env, &group_history_key);
+    }
     group_history.push_back(payment);
     env.storage()
         .persistent()
         .set(&group_history_key, &group_history);
+    bump_persistent(&env, &group_history_key);
 }
 
 pub fn get_user_payment_history(env: Env, user: Address) -> Vec<PaymentHistory> {
     let user_history_key = DataKey::UserPaymentHistory(user);
-    env.storage()
-        .persistent()
-        .get(&user_history_key)
-        .unwrap_or(Vec::new(&env))
+    let result: Option<Vec<PaymentHistory>> = env.storage().persistent().get(&user_history_key);
+    if result.is_some() {
+        bump_persistent(&env, &user_history_key);
+    }
+    result.unwrap_or(Vec::new(&env))
 }
 
 pub fn get_group_payment_history(env: Env, id: BytesN<32>) -> Vec<PaymentHistory> {
     let group_history_key = DataKey::GroupPaymentHistory(id);
-    env.storage()
-        .persistent()
-        .get(&group_history_key)
-        .unwrap_or(Vec::new(&env))
+    let result: Option<Vec<PaymentHistory>> = env.storage().persistent().get(&group_history_key);
+    if result.is_some() {
+        bump_persistent(&env, &group_history_key);
+    }
+    result.unwrap_or(Vec::new(&env))
 }
 
 // ============================================================================
@@ -609,6 +689,7 @@ pub fn get_remaining_usages(env: Env, id: BytesN<32>) -> Result<u32, Error> {
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
     Ok(details.usage_count)
 }
 
@@ -619,6 +700,7 @@ pub fn get_total_usages_paid(env: Env, id: BytesN<32>) -> Result<u32, Error> {
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
     Ok(details.total_usages_paid)
 }
 
@@ -629,6 +711,7 @@ pub fn reduce_usage(env: Env, id: BytesN<32>) -> Result<(), Error> {
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if details.usage_count == 0 {
         return Err(Error::NoUsagesRemaining);
@@ -636,6 +719,7 @@ pub fn reduce_usage(env: Env, id: BytesN<32>) -> Result<(), Error> {
 
     details.usage_count -= 1;
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
     Ok(())
 }
 
@@ -661,6 +745,7 @@ pub fn update_members(
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if details.creator != caller {
         return Err(Error::Unauthorized);
@@ -696,10 +781,12 @@ pub fn update_members(
     // Update members in details
     details.members = new_members.clone();
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     // Also update the GroupMembers storage
     let members_key = DataKey::GroupMembers(id.clone());
     env.storage().persistent().set(&members_key, &new_members);
+    bump_persistent(&env, &members_key);
 
     AutoshareUpdated {
         id: id.clone(),
@@ -722,6 +809,7 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if details.creator != caller {
         return Err(Error::Unauthorized);
@@ -733,6 +821,7 @@ pub fn deactivate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(),
 
     details.is_active = false;
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     GroupDeactivated {
         id: id.clone(),
@@ -755,6 +844,7 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if details.creator != caller {
         return Err(Error::Unauthorized);
@@ -766,6 +856,7 @@ pub fn activate_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), E
 
     details.is_active = true;
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     GroupActivated {
         id: id.clone(),
@@ -782,6 +873,7 @@ pub fn is_group_active(env: Env, id: BytesN<32>) -> Result<bool, Error> {
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
     Ok(details.is_active)
 }
 
@@ -813,6 +905,9 @@ pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Err
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    // We don't bump here if we are removing it, but we might return early if deactivated check fails
+    // However, the requirement says bump on every read.
+    bump_persistent(&env, &key);
 
     // Step 2: Verify caller is creator or admin
     let admin_result = get_admin(env.clone());
@@ -846,6 +941,9 @@ pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Err
         .persistent()
         .get(&all_groups_key)
         .unwrap_or(Vec::new(&env));
+    if !group_ids.is_empty() {
+        bump_persistent(&env, &all_groups_key);
+    }
 
     let mut new_group_ids: Vec<BytesN<32>> = Vec::new(&env);
     for group_id in group_ids.iter() {
@@ -856,6 +954,7 @@ pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Err
     env.storage()
         .persistent()
         .set(&all_groups_key, &new_group_ids);
+    bump_persistent(&env, &all_groups_key);
 
     // Step 6: Remove the AutoShare(id) entry
     env.storage().persistent().remove(&key);
@@ -949,6 +1048,7 @@ pub fn distribute(
         .persistent()
         .get(&key)
         .ok_or(Error::NotFound)?;
+    bump_persistent(&env, &key);
 
     if !details.is_active {
         return Err(Error::GroupInactive);
@@ -979,6 +1079,7 @@ pub fn distribute(
 
     details.usage_count -= 1;
     env.storage().persistent().set(&key, &details);
+    bump_persistent(&env, &key);
 
     Distribution {
         id,
