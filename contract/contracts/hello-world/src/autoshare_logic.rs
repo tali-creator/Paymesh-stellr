@@ -25,12 +25,13 @@ const PERSISTENT_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS; // 30 days
 
 fn bump_persistent<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
     if env.storage().persistent().has(key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
     }
 }
-
 pub fn create_autoshare(
     env: Env,
     id: BytesN<32>,
@@ -929,7 +930,7 @@ pub fn delete_group(env: Env, id: BytesN<32>, caller: Address) -> Result<(), Err
     if details.usage_count > 0 {
         // Option 1: Strict enforcement - uncomment to require zero usages
         // return Err(Error::GroupHasRemainingUsages);
-        
+
         // Option 2: Allow deletion with forfeiture (current implementation)
         // The remaining usages are simply forfeited
     }

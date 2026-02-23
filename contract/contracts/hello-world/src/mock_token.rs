@@ -9,9 +9,11 @@ const PERSISTENT_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
 
 fn bump_persistent<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
     if env.storage().persistent().has(key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
     }
 }
 
