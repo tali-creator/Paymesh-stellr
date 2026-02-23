@@ -246,11 +246,6 @@ impl AutoShareContract {
     pub fn get_total_usages_paid(env: Env, id: BytesN<32>) -> u32 {
         autoshare_logic::get_total_usages_paid(env, id).unwrap()
     }
-
-    /// Reduces the usage count by 1 (dummy function for testing).
-    pub fn reduce_usage(env: Env, id: BytesN<32>) {
-        autoshare_logic::reduce_usage(env, id).unwrap();
-    }
 }
 
 // 3. Link the tests (Requirement: Unit Tests)

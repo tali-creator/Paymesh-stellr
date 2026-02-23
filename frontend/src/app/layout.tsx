@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { DM_Sans, Geist, Geist_Mono, Anton } from "next/font/google";
 import "./globals.css";
+import { WalletProvider } from "../context/WalletContext";
+
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -100,7 +102,9 @@ export default function RootLayout({
         className={`bg-no-repeat bg-fixed bg h-full bg-cover ${dmSans.variable} ${anton.variable} ${geistSans.variable} ${geistMono.variable} antialiased font-dmsans`}
         suppressHydrationWarning={true}
       >
-        {children}
+        <WalletProvider>
+          {children}
+        </WalletProvider>
       </body>
     </html>
   );

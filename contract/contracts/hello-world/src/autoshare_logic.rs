@@ -705,6 +705,8 @@ pub fn get_total_usages_paid(env: Env, id: BytesN<32>) -> Result<u32, Error> {
     Ok(details.total_usages_paid)
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub fn reduce_usage(env: Env, id: BytesN<32>) -> Result<(), Error> {
     let key = DataKey::AutoShare(id);
     let mut details: AutoShareDetails = env

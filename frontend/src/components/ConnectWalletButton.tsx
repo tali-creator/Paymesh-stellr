@@ -4,6 +4,8 @@ import { connect, disconnect, getPublicKey } from "@/hooks/stellar-wallets-kit";
 import { useEffect, useState, useRef } from "react";
 import { MoreVertical, LogOut, User } from "lucide-react";
 
+import { useWallet } from "@/context/WalletContext";
+
 const style = `
   @keyframes gradientShift {
     0% {
@@ -69,6 +71,9 @@ export default function ConnectWalletButton() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const { isLoading, connectWallet, disconnectWallet } = useWallet();
+ 
+
   async function showConnected() {
     const key = await getPublicKey();
     if (key) {
@@ -121,7 +126,7 @@ export default function ConnectWalletButton() {
         aria-live="polite"
         ref={dropdownRef}
       >
-        {!loading && publicKey && (
+        {!isLoading && publicKey && (
           <>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -150,7 +155,11 @@ export default function ConnectWalletButton() {
                   </p>
                 </div>
                 <button
-                  onClick={() => disconnect(showDisconnected)}
+                  // onClick={() => disconnect(showDisconnected)}
+                  onClick={async () => {
+                    await disconnectWallet();
+                    setDropdownOpen(false);
+                  }}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#FF4D4D] hover:bg-[#FF4D4D]/10 transition-colors font-medium"
                 >
                   <LogOut size={16} />
@@ -161,10 +170,11 @@ export default function ConnectWalletButton() {
           </>
         )}
 
-        {!loading && !publicKey && (
+        {!isLoading && !publicKey && (
           <>
             <button
-              onClick={() => connect(showConnected)}
+              // onClick={() => connect(showConnected)}
+              onClick={connectWallet}
               className="bg-[#5B63D6] hover:bg-[#4A51C9] text-white px-3 lg:px-6 py-[11px] lg:py-[15px] rounded-full text-xs lg:text-sm/[100%] font-black tracking-[0] uppercase transition-colors shadow-lg shadow-indigo-500/20"
             >
               CONNECT WALLET
