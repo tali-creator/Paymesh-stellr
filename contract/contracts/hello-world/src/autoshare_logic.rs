@@ -3,7 +3,9 @@ use crate::base::events::{
     AdminTransferred, AutoshareCreated, AutoshareUpdated, ContractPaused, ContractUnpaused,
     Distribution, GroupActivated, GroupDeactivated, GroupDeleted, Withdrawal,
 };
-use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
+use crate::base::types::{
+    AutoShareDetails, DistributionHistory, GroupMember, MemberAmount, PaymentHistory,
+};
 use soroban_sdk::{contracttype, token, Address, BytesN, Env, String, Vec};
 
 #[contracttype]
@@ -15,6 +17,8 @@ pub enum DataKey {
     UsageFee,
     UserPaymentHistory(Address),
     GroupPaymentHistory(BytesN<32>),
+    GroupDistributionHistory(BytesN<32>),
+    MemberDistributionHistory(Address),
     IsPaused,
 }
 
@@ -637,6 +641,74 @@ pub fn get_group_payment_history(env: Env, id: BytesN<32>) -> Vec<PaymentHistory
 }
 
 // ============================================================================
+// Distribution History
+// ============================================================================
+
+fn record_distribution(
+    env: Env,
+    group_id: BytesN<32>,
+    sender: Address,
+    total_amount: i128,
+    token: Address,
+    member_amounts: Vec<MemberAmount>,
+    distribution_number: u32,
+) {
+    let timestamp = env.ledger().timestamp();
+
+    let distribution = DistributionHistory {
+        group_id: group_id.clone(),
+        sender: sender.clone(),
+        total_amount,
+        token: token.clone(),
+        member_amounts: member_amounts.clone(),
+        timestamp,
+        distribution_number,
+    };
+
+    // Add to group's distribution history
+    let group_history_key = DataKey::GroupDistributionHistory(group_id);
+    let mut group_history: Vec<DistributionHistory> = env
+        .storage()
+        .persistent()
+        .get(&group_history_key)
+        .unwrap_or(Vec::new(&env));
+    group_history.push_back(distribution.clone());
+    env.storage()
+        .persistent()
+        .set(&group_history_key, &group_history);
+
+    // Add to each member's distribution history
+    for member_amount in member_amounts.iter() {
+        let member_history_key = DataKey::MemberDistributionHistory(member_amount.address.clone());
+        let mut member_history: Vec<DistributionHistory> = env
+            .storage()
+            .persistent()
+            .get(&member_history_key)
+            .unwrap_or(Vec::new(&env));
+        member_history.push_back(distribution.clone());
+        env.storage()
+            .persistent()
+            .set(&member_history_key, &member_history);
+    }
+}
+
+pub fn get_group_distributions(env: Env, id: BytesN<32>) -> Vec<DistributionHistory> {
+    let group_history_key = DataKey::GroupDistributionHistory(id);
+    env.storage()
+        .persistent()
+        .get(&group_history_key)
+        .unwrap_or(Vec::new(&env))
+}
+
+pub fn get_member_distributions(env: Env, member: Address) -> Vec<DistributionHistory> {
+    let member_history_key = DataKey::MemberDistributionHistory(member);
+    env.storage()
+        .persistent()
+        .get(&member_history_key)
+        .unwrap_or(Vec::new(&env))
+}
+
+// ============================================================================
 // Usage Tracking
 // ============================================================================
 
@@ -1015,6 +1087,7 @@ pub fn distribute(
 
     let mut distributed: i128 = 0;
     let members_len = details.members.len() as usize;
+    let mut member_amounts: Vec<MemberAmount> = Vec::new(&env);
     for (idx, member) in details.members.iter().enumerate() {
         let share = if idx + 1 < members_len {
             (amount * (member.percentage as i128)) / 100
@@ -1024,8 +1097,23 @@ pub fn distribute(
         if share > 0 {
             client.transfer(&env.current_contract_address(), &member.address, &share);
             distributed += share;
+            member_amounts.push_back(MemberAmount {
+                address: member.address.clone(),
+                amount: share,
+            });
         }
     }
+
+    let distribution_number = details.total_usages_paid - details.usage_count;
+    record_distribution(
+        env.clone(),
+        id.clone(),
+        sender.clone(),
+        amount,
+        token.clone(),
+        member_amounts,
+        distribution_number,
+    );
 
     details.usage_count -= 1;
     env.storage().persistent().set(&key, &details);

@@ -28,3 +28,22 @@ pub struct PaymentHistory {
     pub amount_paid: i128,
     pub timestamp: u64,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemberAmount {
+    pub address: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DistributionHistory {
+    pub group_id: BytesN<32>,
+    pub sender: Address,
+    pub total_amount: i128,
+    pub token: Address,
+    pub member_amounts: Vec<MemberAmount>,
+    pub timestamp: u64,
+    pub distribution_number: u32,
+}

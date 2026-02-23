@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
-use crate::base::types::{AutoShareDetails, GroupMember, PaymentHistory};
+use crate::base::types::{AutoShareDetails, DistributionHistory, GroupMember, PaymentHistory};
 
 /// AutoShareTrait defines the interface for the AutoShare contract.
 /// This trait serves as a formal specification that the AutoShareContract implementation
@@ -146,6 +146,16 @@ pub trait AutoShareTrait {
 
     /// Returns all payment history for a group.
     fn get_group_payment_history(env: Env, id: BytesN<32>) -> Vec<PaymentHistory>;
+
+    // ============================================================================
+    // Distribution History
+    // ============================================================================
+
+    /// Returns all distribution history for a group.
+    fn get_group_distributions(env: Env, id: BytesN<32>) -> Vec<DistributionHistory>;
+
+    /// Returns all distribution history for a member.
+    fn get_member_distributions(env: Env, member: Address) -> Vec<DistributionHistory>;
 
     // ============================================================================
     // Usage Tracking
